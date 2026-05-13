@@ -2,7 +2,12 @@ import json
 import requests
 from bs4 import BeautifulSoup
 
-SEARCH_URL = "https://www.donedeal.ie/phones-for-sale"
+# Category → DoneDeal section URL mapping.
+# Add new categories here if you want to search different sections of the site.
+CATEGORY_URLS = {
+    "phones": "https://www.donedeal.ie/phones-for-sale",
+    "gaming": "https://www.donedeal.ie/gaming-for-sale",
+}
 
 HEADERS = {
     "User-Agent": (
@@ -13,16 +18,17 @@ HEADERS = {
 }
 
 
-def search_iphones(model):
+def search_item(model, category="phones"):
     """
-    Search DoneDeal for the given model string (e.g. 'iPhone 13').
+    Search DoneDeal for the given model string in the given category.
     Returns a list of dicts: {id, title, price, url}.
     """
+    search_url = CATEGORY_URLS.get(category, CATEGORY_URLS["phones"])
     params = {"query": model, "sort": "publishDate", "order": "desc"}
 
     try:
         response = requests.get(
-            SEARCH_URL, params=params, headers=HEADERS, timeout=15
+            search_url, params=params, headers=HEADERS, timeout=15
         )
         response.raise_for_status()
     except requests.RequestException as e:
@@ -33,8 +39,13 @@ def search_iphones(model):
 
     listings = _parse_nextjs(soup)
     if not listings:
-        print(f"  [scraper] Could not find __NEXT_DATA__ listings for '{model}'.")
+        print(f"  [scraper] Could not parse listings for '{model}' — page structure may have changed.")
     return listings
+
+
+# Keep old name as an alias so nothing breaks if called directly
+def search_iphones(model):
+    return search_item(model, category="phones")
 
 
 # ---------------------------------------------------------------------------

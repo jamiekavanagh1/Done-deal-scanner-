@@ -11,7 +11,7 @@ def send_discord_alert(webhook_url, model, title, price, average_price, url):
         return
 
     message = (
-        "**Cheap iPhone found!**\n"
+        "**Cheap deal found!**\n"
         f"**{model}**\n"
         f"Title: {title}\n"
         f"Price: €{price:.0f}\n"
