@@ -23,7 +23,7 @@ def init_db():
 
 
 def save_listing(listing_id, model, title, price, url):
-    """Insert a listing. Returns True if new, False if already seen."""
+    """Insert a listing. Returns True if new, False if already seen (duplicate)."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     try:
@@ -34,22 +34,41 @@ def save_listing(listing_id, model, title, price, url):
         conn.commit()
         return True
     except sqlite3.IntegrityError:
-        return False
+        return False  # listing_id already exists
     finally:
         conn.close()
 
 
-def get_average_price(model):
-    """Return the mean price for a model, or None if fewer than 5 samples."""
+def get_price_stats(model):
+    """
+    Return price statistics for a model using all stored listings.
+
+    Returns a dict with keys: mean, median, count, low, high
+    Returns None if fewer than MIN_SAMPLES listings exist.
+
+    Why both mean and median?
+      - Median is not affected by a single unusually high or low listing.
+        We use it as the reference price when checking for deals.
+      - Mean gives a broader sense of the typical market price.
+    """
+    from config import MIN_SAMPLES  # imported here to avoid circular imports at module load
+
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT price FROM listings WHERE model = ? AND price > 0",
+        "SELECT price FROM listings WHERE model = ? AND price > 0 ORDER BY price",
         (model,),
     )
     prices = [row[0] for row in cursor.fetchall()]
     conn.close()
 
-    if len(prices) < 5:
+    if len(prices) < MIN_SAMPLES:
         return None
-    return statistics.mean(prices)
+
+    return {
+        "mean":   round(statistics.mean(prices), 2),
+        "median": round(statistics.median(prices), 2),
+        "count":  len(prices),
+        "low":    min(prices),
+        "high":   max(prices),
+    }

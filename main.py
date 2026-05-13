@@ -1,83 +1,26 @@
 import time
 
-from database import init_db, save_listing, get_average_price
+import config
+from database import init_db, save_listing, get_price_stats
 from notifier import send_discord_alert
 from scraper import search_item
 
-# ── Configuration ──────────────────────────────────────────────────────────────
+# Pre-build the full list of model names once — passed to the scraper so it
+# can filter out more-specific variants from search results automatically.
+ALL_MODELS = [item["model"] for item in config.ITEMS]
 
-# Paste your Discord webhook URL here.
-# Create one via: Discord Server Settings → Integrations → Webhooks → New Webhook
-DISCORD_WEBHOOK_URL = "YOUR_DISCORD_WEBHOOK_URL"
-
-# Items to scan.
-# Each entry is a dict with:
-#   "model"    – the search term sent to DoneDeal
-#   "category" – "phones" or "gaming" (controls which section of the site is searched)
-#
-# To add more items, just copy an existing line and change the model name.
-ITEMS = [
-    # ── iPhone 12 family ──────────────────────────────────────────────────────
-    {"model": "iPhone 12 Mini",     "category": "phones"},
-    {"model": "iPhone 12",          "category": "phones"},
-    {"model": "iPhone 12 Pro",      "category": "phones"},
-    {"model": "iPhone 12 Pro Max",  "category": "phones"},
-
-    # ── iPhone 13 family ──────────────────────────────────────────────────────
-    {"model": "iPhone 13 Mini",     "category": "phones"},
-    {"model": "iPhone 13",          "category": "phones"},
-    {"model": "iPhone 13 Pro",      "category": "phones"},
-    {"model": "iPhone 13 Pro Max",  "category": "phones"},
-
-    # ── iPhone 14 family ──────────────────────────────────────────────────────
-    {"model": "iPhone 14",          "category": "phones"},
-    {"model": "iPhone 14 Plus",     "category": "phones"},
-    {"model": "iPhone 14 Pro",      "category": "phones"},
-    {"model": "iPhone 14 Pro Max",  "category": "phones"},
-
-    # ── iPhone 15 family ──────────────────────────────────────────────────────
-    {"model": "iPhone 15",          "category": "phones"},
-    {"model": "iPhone 15 Plus",     "category": "phones"},
-    {"model": "iPhone 15 Pro",      "category": "phones"},
-    {"model": "iPhone 15 Pro Max",  "category": "phones"},
-
-    # ── iPhone 16 family ──────────────────────────────────────────────────────
-    {"model": "iPhone 16",          "category": "phones"},
-    {"model": "iPhone 16 Plus",     "category": "phones"},
-    {"model": "iPhone 16 Pro",      "category": "phones"},
-    {"model": "iPhone 16 Pro Max",  "category": "phones"},
-
-    # ── iPhone 17 family ──────────────────────────────────────────────────────
-    {"model": "iPhone 17",          "category": "phones"},
-    {"model": "iPhone 17 Air",      "category": "phones"},
-    {"model": "iPhone 17 Pro",      "category": "phones"},
-    {"model": "iPhone 17 Pro Max",  "category": "phones"},
-
-    # ── Gaming ────────────────────────────────────────────────────────────────
-    {"model": "PS5",                "category": "gaming"},
-    {"model": "PS5 Pro",            "category": "gaming"},
-    {"model": "PS5 Slim",           "category": "gaming"},
-]
-
-# How far below the average price a listing must be to trigger an alert.
-# 0.25 means 25% cheaper than average.
-DISCOUNT_THRESHOLD = 0.25
-
-# How many seconds to wait between full scans (120 = 2 minutes).
-SCAN_INTERVAL_SECONDS = 120
-
-# ── Main loop ──────────────────────────────────────────────────────────────────
 
 def scan_once():
-    for item in ITEMS:
+    for item in config.ITEMS:
         model    = item["model"]
         category = item["category"]
 
-        print(f"\nScanning: {model}")
-        listings = search_item(model, category)
-        print(f"  Found {len(listings)} listing(s) on DoneDeal.")
+        print(f"\n[{category}] {model}")
+        listings = search_item(model, category, ALL_MODELS)
+        print(f"  {len(listings)} matching listing(s) found.")
 
         new_count = 0
+
         for listing in listings:
             is_new = save_listing(
                 listing_id=listing["id"],
@@ -88,53 +31,60 @@ def scan_once():
             )
 
             if not is_new:
-                continue  # Already seen — skip
+                continue  # Already in database — skip
 
             new_count += 1
-            average = get_average_price(model)
+            stats = get_price_stats(model)
 
-            if average is None:
-                # Not enough data yet to calculate a meaningful average
-                print(
-                    f"  [new] {listing['title']} @ €{listing['price']:.0f}"
-                    " (building price history — no alert yet)"
-                )
+            if stats is None:
+                # Not enough data yet — just log and move on
+                print(f"  [new]  {listing['title']} @ €{listing['price']:.0f}"
+                      f"  (need {config.MIN_SAMPLES} samples for alerts — collecting...)")
                 continue
 
-            discount = (average - listing["price"]) / average
-            status = f"{discount * 100:.0f}% below avg €{average:.0f}"
+            # Use median as the reference price — it ignores outliers better than mean
+            discount = (stats["median"] - listing["price"]) / stats["median"]
+            pct_str  = f"{discount * 100:.0f}%"
 
-            if discount >= DISCOUNT_THRESHOLD:
-                print(f"  [DEAL] {listing['title']} @ €{listing['price']:.0f} — {status}")
+            if discount >= config.DISCOUNT_THRESHOLD:
+                print(f"  [DEAL] {listing['title']}")
+                print(f"         €{listing['price']:.0f} — {pct_str} below median €{stats['median']:.0f}")
                 send_discord_alert(
-                    webhook_url=DISCORD_WEBHOOK_URL,
+                    webhook_url=config.DISCORD_WEBHOOK_URL,
                     model=model,
                     title=listing["title"],
                     price=listing["price"],
-                    average_price=average,
+                    stats=stats,
                     url=listing["url"],
                 )
             else:
-                print(f"  [new]  {listing['title']} @ €{listing['price']:.0f} — {status}")
+                sign = "below" if discount > 0 else "above"
+                print(f"  [new]  {listing['title']} @ €{listing['price']:.0f}"
+                      f"  ({pct_str} {sign} median €{stats['median']:.0f})")
 
         if new_count == 0:
             print("  No new listings since last scan.")
 
 
 def main():
-    names = [i["model"] for i in ITEMS]
-    print("=== DoneDeal Deal Scanner ===")
-    print(f"Watching : {len(ITEMS)} items")
-    print(f"Alert    : listings >{DISCOUNT_THRESHOLD * 100:.0f}% below average price")
-    print(f"Interval : every {SCAN_INTERVAL_SECONDS // 60} minute(s)\n")
+    print("=" * 50)
+    print("       DoneDeal Deal Scanner")
+    print("=" * 50)
+    print(f"Products : {len(config.ITEMS)}")
+    print(f"Alert    : >{config.DISCOUNT_THRESHOLD * 100:.0f}% below median price")
+    print(f"Interval : every {config.SCAN_INTERVAL_SECONDS // 60} minute(s)")
+    print(f"Samples  : alerts need ≥{config.MIN_SAMPLES} listings per product")
+    print("=" * 50)
 
     init_db()
 
     while True:
-        print("─" * 40)
         scan_once()
-        print(f"\nSleeping {SCAN_INTERVAL_SECONDS}s until next scan…")
-        time.sleep(SCAN_INTERVAL_SECONDS)
+        print(f"\n{'─' * 50}")
+        print(f"Next scan in {config.SCAN_INTERVAL_SECONDS}s  "
+              f"(Ctrl+C to stop)")
+        print(f"{'─' * 50}")
+        time.sleep(config.SCAN_INTERVAL_SECONDS)
 
 
 if __name__ == "__main__":
