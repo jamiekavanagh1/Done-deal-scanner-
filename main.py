@@ -2,7 +2,7 @@ import time
 
 import config
 from database import init_db, save_listing, get_price_stats
-from notifier import send_discord_alert
+from notifier import send_telegram_alert
 from scraper import search_item
 
 # Pre-build the full list of model names once — passed to the scraper so it
@@ -49,8 +49,9 @@ def scan_once():
             if discount >= config.DISCOUNT_THRESHOLD:
                 print(f"  [DEAL] {listing['title']}")
                 print(f"         €{listing['price']:.0f} — {pct_str} below median €{stats['median']:.0f}")
-                send_discord_alert(
-                    webhook_url=config.DISCORD_WEBHOOK_URL,
+                send_telegram_alert(
+                    token=config.TELEGRAM_BOT_TOKEN,
+                    chat_id=config.TELEGRAM_CHAT_ID,
                     model=model,
                     title=listing["title"],
                     price=listing["price"],

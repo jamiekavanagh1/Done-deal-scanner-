@@ -1,6 +1,7 @@
-# ── Discord ────────────────────────────────────────────────────────────────────
-# Create a webhook: Discord Server Settings → Integrations → Webhooks → New Webhook
-DISCORD_WEBHOOK_URL = "YOUR_DISCORD_WEBHOOK_URL"
+# ── Telegram ──────────────────────────────────────────────────────────────────
+# Bot token from @BotFather, chat ID from @userinfobot or @getidsbot
+TELEGRAM_BOT_TOKEN = "8990302755:AAHc6wgZ_D8975tcccGjd4dxcdteSDIQdzs"
+TELEGRAM_CHAT_ID   = "8179326853"
 
 # ── Scanner behaviour ──────────────────────────────────────────────────────────
 SCAN_INTERVAL_SECONDS = 120   # How often to scan (2 minutes)
